@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
+	"strings"
 	"testing"
 
 	"craft/internal/workflow"
@@ -310,5 +312,120 @@ func TestFullWorkflow(t *testing.T) {
 	}
 	if workflow.Exists() {
 		t.Error("Workflow should not exist after reset")
+	}
+}
+
+func TestConfirm(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"y\n", true},
+		{"Y\n", true},
+		{"yes\n", true},
+		{"YES\n", true},
+		{"Yes\n", true},
+		{"n\n", false},
+		{"N\n", false},
+		{"no\n", false},
+		{"\n", false},
+		{"maybe\n", false},
+		{"", false}, // EOF
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			reader := strings.NewReader(tt.input)
+			got := confirm(reader)
+			if got != tt.want {
+				t.Errorf("confirm(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResetInteractiveYes(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+
+	// Simulate user typing "y"
+	oldStdin := stdinReader
+	stdinReader = strings.NewReader("y\n")
+	defer func() { stdinReader = oldStdin }()
+
+	code := Reset(nil)
+	if code != 0 {
+		t.Errorf("Reset() with 'y' = %d, want 0", code)
+	}
+
+	if workflow.Exists() {
+		t.Error("Workflow should not exist after confirmed reset")
+	}
+}
+
+func TestResetInteractiveNo(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+
+	// Simulate user typing "n"
+	oldStdin := stdinReader
+	stdinReader = strings.NewReader("n\n")
+	defer func() { stdinReader = oldStdin }()
+
+	code := Reset(nil)
+	if code != 0 {
+		t.Errorf("Reset() with 'n' = %d, want 0", code)
+	}
+
+	if !workflow.Exists() {
+		t.Error("Workflow should still exist after cancelled reset")
+	}
+}
+
+func TestStatusChecksumWarning(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test checksum"})
+
+	// Tamper with the checksum by writing directly to the file
+	content := `---
+state: thinking
+schema_version: 1
+checksum: 00000000
+---
+
+# Intent
+Test checksum
+
+## Notes
+(none)
+`
+	os.WriteFile(".craft/workflow.md", []byte(content), 0644)
+
+	// Capture stdout
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	code := Status(nil)
+
+	w.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if code != 0 {
+		t.Errorf("Status() = %d, want 0", code)
+	}
+
+	if !strings.Contains(output, "Warning") {
+		t.Error("Status() should display checksum warning for tampered file")
 	}
 }

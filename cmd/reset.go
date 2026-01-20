@@ -3,11 +3,16 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"craft/internal/workflow"
 )
+
+// stdinReader is the default input source for confirmation prompts.
+// It can be replaced in tests to simulate user input.
+var stdinReader io.Reader = os.Stdin
 
 // Reset abandons the current workflow.
 func Reset(args []string) int {
@@ -30,14 +35,14 @@ func Reset(args []string) int {
 		// File exists but can't be parsed - still allow reset
 		if !force {
 			fmt.Print("Abandon corrupted workflow? [y/N] ")
-			if !confirmReset() {
+			if !confirm(stdinReader) {
 				fmt.Println("Cancelled.")
 				return 0
 			}
 		}
 	} else if !force {
 		fmt.Printf("Abandon workflow \"%s\"? [y/N] ", w.Intent)
-		if !confirmReset() {
+		if !confirm(stdinReader) {
 			fmt.Println("Cancelled.")
 			return 0
 		}
@@ -52,8 +57,9 @@ func Reset(args []string) int {
 	return 0
 }
 
-func confirmReset() bool {
-	reader := bufio.NewReader(os.Stdin)
+// confirm reads from the given reader and returns true if the user confirms.
+func confirm(r io.Reader) bool {
+	reader := bufio.NewReader(r)
 	input, err := reader.ReadString('\n')
 	if err != nil {
 		return false

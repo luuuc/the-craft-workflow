@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"craft/internal/state"
@@ -166,35 +165,38 @@ func (w *Workflow) Save() error {
 	return nil
 }
 
-// Format returns the workflow as a formatted string with checksum.
-func (w *Workflow) Format() string {
-	var notes string
+// formatNotes returns notes formatted for the workflow file.
+func (w *Workflow) formatNotes() string {
 	if len(w.Notes) == 0 {
-		notes = "(none)"
-	} else {
-		var noteLines []string
-		for _, n := range w.Notes {
-			noteLines = append(noteLines, "- "+n)
-		}
-		notes = strings.Join(noteLines, "\n")
+		return "(none)"
 	}
+	var noteLines []string
+	for _, n := range w.Notes {
+		noteLines = append(noteLines, "- "+n)
+	}
+	return strings.Join(noteLines, "\n")
+}
 
-	// Build content without checksum to compute checksum
-	bodyContent := fmt.Sprintf(`
+// contentForChecksum returns the content used for checksum computation.
+// This excludes the checksum field itself to allow verification.
+func (w *Workflow) contentForChecksum() string {
+	return fmt.Sprintf(`---
+state: %s
+schema_version: %d
+---
+
 # Intent
 %s
 
 ## Notes
 %s
-`, w.Intent, notes)
+`, w.State, w.SchemaVersion, w.Intent, w.formatNotes())
+}
 
-	contentForChecksum := fmt.Sprintf(`---
-state: %s
-schema_version: %d
----
-%s`, w.State, w.SchemaVersion, bodyContent)
-
-	checksum := ComputeChecksum([]byte(contentForChecksum))
+// Format returns the workflow as a formatted string with checksum.
+func (w *Workflow) Format() string {
+	content := w.contentForChecksum()
+	checksum := ComputeChecksum([]byte(content))
 	w.Checksum = checksum
 
 	return fmt.Sprintf(`---
@@ -202,7 +204,13 @@ state: %s
 schema_version: %d
 checksum: %s
 ---
-%s`, w.State, w.SchemaVersion, checksum, bodyContent)
+
+# Intent
+%s
+
+## Notes
+%s
+`, w.State, w.SchemaVersion, checksum, w.Intent, w.formatNotes())
 }
 
 // ComputeChecksum generates a SHA-256 checksum (first 8 hex chars).
@@ -213,32 +221,7 @@ func ComputeChecksum(content []byte) string {
 
 // ValidateChecksum verifies the stored checksum matches the content.
 func (w *Workflow) ValidateChecksum() error {
-	var notes string
-	if len(w.Notes) == 0 {
-		notes = "(none)"
-	} else {
-		var noteLines []string
-		for _, n := range w.Notes {
-			noteLines = append(noteLines, "- "+n)
-		}
-		notes = strings.Join(noteLines, "\n")
-	}
-
-	bodyContent := fmt.Sprintf(`
-# Intent
-%s
-
-## Notes
-%s
-`, w.Intent, notes)
-
-	contentForChecksum := fmt.Sprintf(`---
-state: %s
-schema_version: %d
----
-%s`, w.State, w.SchemaVersion, bodyContent)
-
-	expected := ComputeChecksum([]byte(contentForChecksum))
+	expected := ComputeChecksum([]byte(w.contentForChecksum()))
 	if w.Checksum != expected {
 		return errors.New("checksum mismatch: workflow file may have been modified externally")
 	}
@@ -270,9 +253,8 @@ func New(intent string) *Workflow {
 
 // AddNote appends a note to the workflow.
 func (w *Workflow) AddNote(note string) {
-	// Clean up the note - remove quotes if wrapped
 	note = strings.TrimSpace(note)
-	note = regexp.MustCompile(`^["']|["']$`).ReplaceAllString(note, "")
+	note = strings.Trim(note, "\"'")
 	if note != "" {
 		w.Notes = append(w.Notes, note)
 	}
