@@ -1,0 +1,6 @@
+version: 1
+ai:
+  command: claude
+  timeout: 120
+targets:
+  - claude
