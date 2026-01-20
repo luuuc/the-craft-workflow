@@ -26,6 +26,7 @@ craft reject [note]      Record concern, stay in thinking
 craft ship               Finalize the work
 craft status             Show current state and valid actions
 craft reset              Abandon current workflow
+craft init [flags]       Copy AI integration templates
 ```
 
 ## Installation
@@ -72,6 +73,30 @@ Markdown with YAML front matter. Human-readable. Machine-parseable. A checksum d
 - No daemon or background process
 - No network calls
 - No configuration files
+
+## AI Integration
+
+craft works with AI coding assistants. Use `craft init` to copy integration templates:
+
+```bash
+craft init --claude    # Claude Code (CLAUDE.md + slash command)
+craft init --cursor    # Cursor AI (.cursorrules)
+craft init --all       # All templates
+```
+
+Or see [templates/INTEGRATION.md](templates/INTEGRATION.md) for manual setup.
+
+## Development Workflow
+
+This project is built using craft.
+
+Every feature follows the workflow:
+1. `craft start "<intent>"` - Begin with explicit intent
+2. `craft think` - Deliberate before building
+3. `craft accept` - Freeze intent, start implementation
+4. `craft ship` - Finalize when complete
+
+We eat our own dog food.
 
 ## Development
 

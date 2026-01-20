@@ -7,7 +7,7 @@ import (
 	"craft/cmd"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -40,6 +40,8 @@ func run(args []string) int {
 		return cmd.Status(args[1:])
 	case "reset":
 		return cmd.Reset(args[1:])
+	case "init":
+		return cmd.Init(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Error: Unknown command '%s'\n", args[0])
 		fmt.Fprintln(os.Stderr, "Run 'craft --help' for usage.")
@@ -61,6 +63,12 @@ Commands:
   ship               Finalize the workflow
   status             Show current state and valid actions
   reset              Abandon current workflow
+  init [flags]       Copy AI integration templates
+
+Init flags:
+  --claude           Copy Claude Code templates (CLAUDE.md, .claude/commands/)
+  --cursor           Copy Cursor rules (.cursorrules)
+  --all              Copy all templates
 
 State is stored in .craft/workflow.md
 `)

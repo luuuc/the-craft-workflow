@@ -429,3 +429,88 @@ Test checksum
 		t.Error("Status() should display checksum warning for tampered file")
 	}
 }
+
+func TestInitNoFlags(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	code := Init(nil)
+	if code != 1 {
+		t.Errorf("Init() with no flags = %d, want 1", code)
+	}
+}
+
+func TestInitClaude(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	code := Init([]string{"--claude"})
+	if code != 0 {
+		t.Errorf("Init(--claude) = %d, want 0", code)
+	}
+
+	if _, err := os.Stat("CLAUDE.md"); os.IsNotExist(err) {
+		t.Error("CLAUDE.md should exist after init --claude")
+	}
+	if _, err := os.Stat(".claude/commands/craft.md"); os.IsNotExist(err) {
+		t.Error(".claude/commands/craft.md should exist after init --claude")
+	}
+}
+
+func TestInitCursor(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	code := Init([]string{"--cursor"})
+	if code != 0 {
+		t.Errorf("Init(--cursor) = %d, want 0", code)
+	}
+
+	if _, err := os.Stat(".cursorrules"); os.IsNotExist(err) {
+		t.Error(".cursorrules should exist after init --cursor")
+	}
+}
+
+func TestInitAll(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	code := Init([]string{"--all"})
+	if code != 0 {
+		t.Errorf("Init(--all) = %d, want 0", code)
+	}
+
+	if _, err := os.Stat("CLAUDE.md"); os.IsNotExist(err) {
+		t.Error("CLAUDE.md should exist after init --all")
+	}
+	if _, err := os.Stat(".claude/commands/craft.md"); os.IsNotExist(err) {
+		t.Error(".claude/commands/craft.md should exist after init --all")
+	}
+	if _, err := os.Stat(".cursorrules"); os.IsNotExist(err) {
+		t.Error(".cursorrules should exist after init --all")
+	}
+}
+
+func TestInitSkipsExisting(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	// Create CLAUDE.md with custom content
+	os.WriteFile("CLAUDE.md", []byte("custom content"), 0644)
+
+	code := Init([]string{"--claude"})
+	if code != 0 {
+		t.Errorf("Init(--claude) = %d, want 0", code)
+	}
+
+	// Verify custom content preserved
+	content, _ := os.ReadFile("CLAUDE.md")
+	if string(content) != "custom content" {
+		t.Error("Init should not overwrite existing CLAUDE.md")
+	}
+
+	// But .claude/commands/craft.md should be created
+	if _, err := os.Stat(".claude/commands/craft.md"); os.IsNotExist(err) {
+		t.Error(".claude/commands/craft.md should exist")
+	}
+}
