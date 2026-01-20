@@ -23,9 +23,17 @@ func Reject(args []string) int {
 	}
 
 	// Add note (required for reject to be meaningful)
+	var note string
 	if len(args) > 0 {
-		note := strings.Join(args, " ")
+		note = strings.Join(args, " ")
+		note = strings.Trim(note, "\"'")
+		note = strings.TrimSpace(note)
 		w.AddNote(note)
+	}
+
+	// Record rejection in history (no state change, but note is recorded)
+	if note != "" {
+		w.RecordTransition("Rejected: " + note)
 	}
 
 	if err := w.Save(); err != nil {

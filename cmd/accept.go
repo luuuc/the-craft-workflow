@@ -22,13 +22,16 @@ func Accept(args []string) int {
 		return 1
 	}
 
-	// Add optional note
+	// Get optional note for history
+	var note string
 	if len(args) > 0 {
-		note := strings.Join(args, " ")
+		note = strings.Join(args, " ")
+		note = strings.Trim(note, "\"'")
+		note = strings.TrimSpace(note)
 		w.AddNote(note)
 	}
 
-	if err := w.Transition(state.Building); err != nil {
+	if err := w.TransitionWithNote(state.Building, note); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"craft/internal/state"
 )
@@ -20,6 +21,15 @@ func TestNew(t *testing.T) {
 	if w.SchemaVersion != SchemaVersion {
 		t.Errorf("New().SchemaVersion = %v, want %v", w.SchemaVersion, SchemaVersion)
 	}
+	if w.StartedAt.IsZero() {
+		t.Error("New().StartedAt should not be zero")
+	}
+	if len(w.History) != 1 {
+		t.Errorf("New().History len = %d, want 1", len(w.History))
+	}
+	if w.History[0].State != string(state.Thinking) {
+		t.Errorf("New().History[0].State = %v, want %v", w.History[0].State, state.Thinking)
+	}
 }
 
 func TestWorkflowFormat(t *testing.T) {
@@ -29,11 +39,17 @@ func TestWorkflowFormat(t *testing.T) {
 	if !strings.Contains(formatted, "state: thinking") {
 		t.Error("Format() missing state")
 	}
-	if !strings.Contains(formatted, "schema_version: 1") {
+	if !strings.Contains(formatted, "schema_version: 2") {
 		t.Error("Format() missing schema_version")
 	}
 	if !strings.Contains(formatted, "checksum:") {
 		t.Error("Format() missing checksum")
+	}
+	if !strings.Contains(formatted, "started_at:") {
+		t.Error("Format() missing started_at")
+	}
+	if !strings.Contains(formatted, "history:") {
+		t.Error("Format() missing history")
 	}
 	if !strings.Contains(formatted, "# Intent") {
 		t.Error("Format() missing Intent header")
@@ -234,6 +250,225 @@ func TestParseInvalid(t *testing.T) {
 			_, err := Parse([]byte(tt.content))
 			if err == nil {
 				t.Error("Parse() should error for invalid content")
+			}
+		})
+	}
+}
+
+func TestHistoryRoundTrip(t *testing.T) {
+	w := New("History test")
+	w.TransitionWithNote(state.Building, "Ready to build")
+
+	formatted := w.Format()
+	parsed, err := Parse([]byte(formatted))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if len(parsed.History) != 2 {
+		t.Fatalf("History len = %d, want 2", len(parsed.History))
+	}
+
+	if parsed.History[0].State != "thinking" {
+		t.Errorf("History[0].State = %v, want thinking", parsed.History[0].State)
+	}
+	if parsed.History[1].State != "building" {
+		t.Errorf("History[1].State = %v, want building", parsed.History[1].State)
+	}
+	if parsed.History[1].Note != "Ready to build" {
+		t.Errorf("History[1].Note = %v, want 'Ready to build'", parsed.History[1].Note)
+	}
+}
+
+func TestTransitionWithNote(t *testing.T) {
+	w := New("Test")
+	initialHistoryLen := len(w.History)
+
+	err := w.TransitionWithNote(state.Building, "My note")
+	if err != nil {
+		t.Fatalf("TransitionWithNote() error = %v", err)
+	}
+
+	if w.State != state.Building {
+		t.Errorf("State = %v, want building", w.State)
+	}
+
+	if len(w.History) != initialHistoryLen+1 {
+		t.Errorf("History len = %d, want %d", len(w.History), initialHistoryLen+1)
+	}
+
+	lastEntry := w.History[len(w.History)-1]
+	if lastEntry.State != "building" {
+		t.Errorf("Last history entry state = %v, want building", lastEntry.State)
+	}
+	if lastEntry.Note != "My note" {
+		t.Errorf("Last history entry note = %v, want 'My note'", lastEntry.Note)
+	}
+}
+
+func TestRecordTransition(t *testing.T) {
+	w := New("Test")
+	initialLen := len(w.History)
+
+	w.RecordTransition("A note")
+
+	if len(w.History) != initialLen+1 {
+		t.Errorf("History len = %d, want %d", len(w.History), initialLen+1)
+	}
+
+	lastEntry := w.History[len(w.History)-1]
+	if lastEntry.Note != "A note" {
+		t.Errorf("Note = %v, want 'A note'", lastEntry.Note)
+	}
+	if lastEntry.At.IsZero() {
+		t.Error("At should not be zero")
+	}
+}
+
+func TestMigrateV1ToV2(t *testing.T) {
+	// Create a v1 workflow content
+	v1Content := `---
+state: thinking
+schema_version: 1
+checksum: abcd1234
+---
+
+# Intent
+V1 workflow
+
+## Notes
+- A note
+`
+
+	parsed, err := Parse([]byte(v1Content))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if parsed.SchemaVersion != 1 {
+		t.Errorf("Parsed schema_version = %d, want 1", parsed.SchemaVersion)
+	}
+
+	// Use temp directory for save
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origDir)
+
+	// Save should migrate to v2
+	if err := parsed.Save(); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	if parsed.SchemaVersion != 2 {
+		t.Errorf("After migration schema_version = %d, want 2", parsed.SchemaVersion)
+	}
+
+	if len(parsed.History) == 0 {
+		t.Error("Migration should synthesize history")
+	}
+
+	if parsed.StartedAt.IsZero() {
+		t.Error("Migration should set started_at")
+	}
+}
+
+func TestParseHistoryWithNote(t *testing.T) {
+	content := `---
+state: building
+schema_version: 2
+checksum: abcd1234
+started_at: 2024-01-15T10:30:00Z
+history:
+  - state: thinking
+    at: 2024-01-15T10:30:00Z
+  - state: building
+    at: 2024-01-15T14:20:00Z
+    note: "Decided on token bucket"
+---
+
+# Intent
+Add rate limiting
+
+## Notes
+- Note 1
+`
+
+	w, err := Parse([]byte(content))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	expectedTime, _ := time.Parse(time.RFC3339, "2024-01-15T10:30:00Z")
+	if !w.StartedAt.Equal(expectedTime) {
+		t.Errorf("StartedAt = %v, want %v", w.StartedAt, expectedTime)
+	}
+
+	if len(w.History) != 2 {
+		t.Fatalf("History len = %d, want 2", len(w.History))
+	}
+
+	if w.History[0].State != "thinking" {
+		t.Errorf("History[0].State = %v, want thinking", w.History[0].State)
+	}
+
+	if w.History[1].Note != "Decided on token bucket" {
+		t.Errorf("History[1].Note = %v, want 'Decided on token bucket'", w.History[1].Note)
+	}
+}
+
+func TestQuoteEscapingInNotes(t *testing.T) {
+	w := New("Quote test")
+	noteWithQuotes := `Note with "quotes" inside`
+	w.TransitionWithNote(state.Building, noteWithQuotes)
+
+	formatted := w.Format()
+
+	// Verify quotes are escaped in the formatted output
+	if !strings.Contains(formatted, `\"quotes\"`) {
+		t.Errorf("Format() should escape quotes in notes, got:\n%s", formatted)
+	}
+
+	// Verify round-trip preserves the note
+	parsed, err := Parse([]byte(formatted))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if len(parsed.History) < 2 {
+		t.Fatalf("History len = %d, want at least 2", len(parsed.History))
+	}
+
+	if parsed.History[1].Note != noteWithQuotes {
+		t.Errorf("Round-trip note = %q, want %q", parsed.History[1].Note, noteWithQuotes)
+	}
+}
+
+func TestQuoteEscapingEdgeCases(t *testing.T) {
+	tests := []struct {
+		name string
+		note string
+	}{
+		{"single quote", `He said "hello"`},
+		{"multiple quotes", `"start" and "end"`},
+		{"adjacent quotes", `""double""`},
+		{"escaped already", `already \"escaped\"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := New("Test")
+			w.TransitionWithNote(state.Building, tt.note)
+
+			formatted := w.Format()
+			parsed, err := Parse([]byte(formatted))
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+
+			lastEntry := parsed.History[len(parsed.History)-1]
+			if lastEntry.Note != tt.note {
+				t.Errorf("Round-trip note = %q, want %q", lastEntry.Note, tt.note)
 			}
 		})
 	}

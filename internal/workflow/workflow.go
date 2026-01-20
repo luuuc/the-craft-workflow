@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"craft/internal/state"
 )
@@ -15,14 +16,35 @@ import (
 const (
 	CraftDir      = ".craft"
 	WorkflowFile  = "workflow.md"
-	SchemaVersion = 1
+	SchemaVersion = 2
 )
+
+// YAML front matter keys
+const (
+	keyState         = "state"
+	keySchemaVersion = "schema_version"
+	keyChecksum      = "checksum"
+	keyStartedAt     = "started_at"
+	keyHistory       = "history:"
+	keyHistoryState  = "- state:"
+	keyHistoryAt     = "at:"
+	keyHistoryNote   = "note:"
+)
+
+// HistoryEntry records a state transition with timestamp and optional note.
+type HistoryEntry struct {
+	State string
+	At    time.Time
+	Note  string
+}
 
 // Workflow represents a craft workflow.
 type Workflow struct {
 	State         state.State
 	SchemaVersion int
 	Checksum      string
+	StartedAt     time.Time
+	History       []HistoryEntry
 	Intent        string
 	Notes         []string
 }
@@ -52,52 +74,50 @@ func Load() (*Workflow, error) {
 		}
 		return nil, fmt.Errorf("failed to read workflow: %w", err)
 	}
-	return Parse(data)
+
+	w, err := Parse(data)
+	if err != nil {
+		return nil, err
+	}
+
+	// Handle v1 migration in Load (not Parse) since it may need filesystem access
+	if w.SchemaVersion < 2 && len(w.History) == 0 {
+		w.synthesizeV1History(Path())
+	}
+
+	return w, nil
 }
 
-// Parse parses workflow content from bytes.
+// synthesizeV1History creates initial history for v1 workflows being migrated.
+func (w *Workflow) synthesizeV1History(filePath string) {
+	if w.StartedAt.IsZero() {
+		if info, err := os.Stat(filePath); err == nil {
+			w.StartedAt = info.ModTime().UTC()
+		} else {
+			w.StartedAt = time.Now().UTC()
+		}
+	}
+	w.History = []HistoryEntry{{
+		State: string(w.State),
+		At:    w.StartedAt,
+	}}
+}
+
+// Parse parses workflow content from bytes. This is a pure function with no side effects.
 func Parse(data []byte) (*Workflow, error) {
 	content := string(data)
 
-	// Extract front matter
-	if !strings.HasPrefix(content, "---\n") {
-		return nil, errors.New("invalid workflow file: missing front matter")
+	frontMatter, body, err := extractFrontMatter(content)
+	if err != nil {
+		return nil, err
 	}
-
-	parts := strings.SplitN(content[4:], "\n---\n", 2)
-	if len(parts) != 2 {
-		return nil, errors.New("invalid workflow file: malformed front matter")
-	}
-
-	frontMatter := parts[0]
-	body := parts[1]
 
 	w := &Workflow{
-		SchemaVersion: SchemaVersion,
+		SchemaVersion: 1, // Default to v1, will be overwritten if present
 	}
 
-	// Parse front matter
-	for _, line := range strings.Split(frontMatter, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		kv := strings.SplitN(line, ":", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(kv[0])
-		value := strings.TrimSpace(kv[1])
-
-		switch key {
-		case "state":
-			w.State = state.State(value)
-		case "schema_version":
-			fmt.Sscanf(value, "%d", &w.SchemaVersion)
-		case "checksum":
-			w.Checksum = value
-		}
-	}
+	// Parse front matter fields and history
+	parseFrontMatter(frontMatter, w)
 
 	if !w.State.Valid() {
 		return nil, fmt.Errorf("invalid workflow state: %s", w.State)
@@ -107,6 +127,124 @@ func Parse(data []byte) (*Workflow, error) {
 	w.Intent, w.Notes = parseBody(body)
 
 	return w, nil
+}
+
+// extractFrontMatter splits content into front matter and body.
+func extractFrontMatter(content string) (frontMatter, body string, err error) {
+	if !strings.HasPrefix(content, "---\n") {
+		return "", "", errors.New("invalid workflow file: missing front matter")
+	}
+
+	parts := strings.SplitN(content[4:], "\n---\n", 2)
+	if len(parts) != 2 {
+		return "", "", errors.New("invalid workflow file: malformed front matter")
+	}
+
+	return parts[0], parts[1], nil
+}
+
+// parseFrontMatter parses YAML front matter into the workflow struct.
+func parseFrontMatter(frontMatter string, w *Workflow) {
+	lines := strings.Split(frontMatter, "\n")
+	inHistory := false
+	var currentEntry *HistoryEntry
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Check for history array start
+		if trimmed == keyHistory {
+			inHistory = true
+			continue
+		}
+
+		// Handle history entries
+		if inHistory {
+			if trimmed == "" {
+				continue
+			}
+
+			// New history entry starts with "- state:"
+			if strings.HasPrefix(trimmed, keyHistoryState) {
+				if currentEntry != nil {
+					w.History = append(w.History, *currentEntry)
+				}
+				currentEntry = &HistoryEntry{
+					State: strings.TrimSpace(strings.TrimPrefix(trimmed, keyHistoryState)),
+				}
+				continue
+			}
+
+			// If line doesn't start with whitespace, we're done with history
+			if !strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "\t") {
+				if currentEntry != nil {
+					w.History = append(w.History, *currentEntry)
+					currentEntry = nil
+				}
+				inHistory = false
+				// Fall through to process this line as a regular key
+			} else if currentEntry != nil {
+				parseHistoryEntryField(trimmed, currentEntry)
+				continue
+			}
+		}
+
+		// Regular key-value parsing
+		if trimmed == "" {
+			continue
+		}
+		kv := strings.SplitN(trimmed, ":", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(kv[0])
+		value := strings.TrimSpace(kv[1])
+
+		switch key {
+		case keyState:
+			w.State = state.State(value)
+		case keySchemaVersion:
+			fmt.Sscanf(value, "%d", &w.SchemaVersion)
+		case keyChecksum:
+			w.Checksum = value
+		case keyStartedAt:
+			if t, err := time.Parse(time.RFC3339, value); err == nil {
+				w.StartedAt = t
+			}
+		}
+	}
+
+	// Don't forget last history entry
+	if currentEntry != nil {
+		w.History = append(w.History, *currentEntry)
+	}
+}
+
+// parseHistoryEntryField parses a single field within a history entry.
+func parseHistoryEntryField(line string, entry *HistoryEntry) {
+	if strings.HasPrefix(line, keyHistoryAt) {
+		timeStr := strings.TrimSpace(strings.TrimPrefix(line, keyHistoryAt))
+		if t, err := time.Parse(time.RFC3339, timeStr); err == nil {
+			entry.At = t
+		}
+		return
+	}
+	if strings.HasPrefix(line, keyHistoryNote) {
+		note := strings.TrimSpace(strings.TrimPrefix(line, keyHistoryNote))
+		// Remove only the outer quotes (not all quotes like Trim does)
+		if len(note) >= 2 && note[0] == '"' && note[len(note)-1] == '"' {
+			note = note[1 : len(note)-1]
+		}
+		// Unescape: order matters - unescape backslashes first, then quotes
+		note = strings.ReplaceAll(note, `\\`, "\x00") // temp placeholder
+		note = strings.ReplaceAll(note, `\"`, `"`)
+		note = strings.ReplaceAll(note, "\x00", `\`)
+		entry.Note = note
+		return
+	}
+	if strings.HasPrefix(line, keyState+":") {
+		entry.State = strings.TrimSpace(strings.TrimPrefix(line, keyState+":"))
+	}
 }
 
 func parseBody(body string) (intent string, notes []string) {
@@ -148,6 +286,9 @@ func (w *Workflow) Save() error {
 		return fmt.Errorf("failed to create .craft directory: %w", err)
 	}
 
+	// Migrate to v2 if needed
+	w.migrateToV2()
+
 	content := w.Format()
 
 	// Write to temp file first
@@ -165,6 +306,29 @@ func (w *Workflow) Save() error {
 	return nil
 }
 
+// migrateToV2 upgrades a v1 workflow to v2 schema.
+// Called by Save() after Load() has already synthesized history.
+func (w *Workflow) migrateToV2() {
+	if w.SchemaVersion >= 2 {
+		return
+	}
+
+	// StartedAt and History should already be set by Load()'s synthesizeV1History.
+	// These are safety fallbacks for direct Parse() usage.
+	if w.StartedAt.IsZero() {
+		w.StartedAt = time.Now().UTC()
+	}
+
+	if len(w.History) == 0 {
+		w.History = []HistoryEntry{{
+			State: string(w.State),
+			At:    w.StartedAt,
+		}}
+	}
+
+	w.SchemaVersion = SchemaVersion
+}
+
 // formatNotes returns notes formatted for the workflow file.
 func (w *Workflow) formatNotes() string {
 	if len(w.Notes) == 0 {
@@ -177,12 +341,35 @@ func (w *Workflow) formatNotes() string {
 	return strings.Join(noteLines, "\n")
 }
 
-// contentForChecksum returns the content used for checksum computation.
-// This excludes the checksum field itself to allow verification.
-func (w *Workflow) contentForChecksum() string {
+// formatHistory returns history formatted for the workflow file.
+func (w *Workflow) formatHistory() string {
+	if len(w.History) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, h := range w.History {
+		entry := fmt.Sprintf("  - %s: %s\n    %s %s", keyState, h.State, keyHistoryAt, h.At.Format(time.RFC3339))
+		if h.Note != "" {
+			// Escape for YAML: backslashes first, then quotes
+			escapedNote := strings.ReplaceAll(h.Note, `\`, `\\`)
+			escapedNote = strings.ReplaceAll(escapedNote, `"`, `\"`)
+			entry += fmt.Sprintf("\n    %s \"%s\"", keyHistoryNote, escapedNote)
+		}
+		lines = append(lines, entry)
+	}
+	return keyHistory + "\n" + strings.Join(lines, "\n")
+}
+
+// formatWorkflowContent formats the workflow without the checksum field.
+func (w *Workflow) formatWorkflowContent() string {
+	historySection := w.formatHistory()
+	if historySection != "" {
+		historySection = "\n" + historySection
+	}
 	return fmt.Sprintf(`---
-state: %s
-schema_version: %d
+%s: %s
+%s: %d
+%s: %s%s
 ---
 
 # Intent
@@ -190,19 +377,31 @@ schema_version: %d
 
 ## Notes
 %s
-`, w.State, w.SchemaVersion, w.Intent, w.formatNotes())
+`, keyState, w.State, keySchemaVersion, w.SchemaVersion, keyStartedAt, w.StartedAt.Format(time.RFC3339), historySection, w.Intent, w.formatNotes())
+}
+
+// contentForChecksum returns the content used for checksum computation.
+// This excludes the checksum field itself to allow verification.
+func (w *Workflow) contentForChecksum() string {
+	return w.formatWorkflowContent()
 }
 
 // Format returns the workflow as a formatted string with checksum.
 func (w *Workflow) Format() string {
-	content := w.contentForChecksum()
-	checksum := ComputeChecksum([]byte(content))
+	checksumContent := w.formatWorkflowContent()
+	checksum := ComputeChecksum([]byte(checksumContent))
 	w.Checksum = checksum
 
+	historySection := w.formatHistory()
+	if historySection != "" {
+		historySection = "\n" + historySection
+	}
+
 	return fmt.Sprintf(`---
-state: %s
-schema_version: %d
-checksum: %s
+%s: %s
+%s: %d
+%s: %s
+%s: %s%s
 ---
 
 # Intent
@@ -210,7 +409,7 @@ checksum: %s
 
 ## Notes
 %s
-`, w.State, w.SchemaVersion, checksum, w.Intent, w.formatNotes())
+`, keyState, w.State, keySchemaVersion, w.SchemaVersion, keyChecksum, checksum, keyStartedAt, w.StartedAt.Format(time.RFC3339), historySection, w.Intent, w.formatNotes())
 }
 
 // ComputeChecksum generates a SHA-256 checksum (first 8 hex chars).
@@ -243,11 +442,17 @@ func Delete() error {
 
 // New creates a new workflow with the given intent.
 func New(intent string) *Workflow {
+	now := time.Now().UTC()
 	return &Workflow{
 		State:         state.Thinking,
 		SchemaVersion: SchemaVersion,
-		Intent:        intent,
-		Notes:         nil,
+		StartedAt:     now,
+		History: []HistoryEntry{{
+			State: string(state.Thinking),
+			At:    now,
+		}},
+		Intent: intent,
+		Notes:  nil,
 	}
 }
 
@@ -262,9 +467,24 @@ func (w *Workflow) AddNote(note string) {
 
 // Transition validates and performs a state transition.
 func (w *Workflow) Transition(to state.State) error {
+	return w.TransitionWithNote(to, "")
+}
+
+// TransitionWithNote validates and performs a state transition with an optional note.
+func (w *Workflow) TransitionWithNote(to state.State, note string) error {
 	if err := state.ValidateTransition(w.State, to); err != nil {
 		return err
 	}
 	w.State = to
+	w.RecordTransition(note)
 	return nil
+}
+
+// RecordTransition adds a history entry for the current state.
+func (w *Workflow) RecordTransition(note string) {
+	w.History = append(w.History, HistoryEntry{
+		State: string(w.State),
+		At:    time.Now().UTC(),
+		Note:  note,
+	})
 }
