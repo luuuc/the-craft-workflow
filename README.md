@@ -11,23 +11,29 @@ Decisions drift. Work advances before thinking is done. Nothing enforces the fir
 A CLI that says "no" when you try to skip thinking.
 
 ```
-thinking → building → shipped
+thinking → shaping → building → shipped
 ```
 
-You can't ship without building. You can't build without thinking first.
+You can't ship without building. You can't build without shaping (or skipping it). You can't shape without thinking first.
 
 ## Commands
 
 ```
 craft start "<intent>"   Begin with explicit intent
 craft think [--review]   Review where you are (optionally invoke reviewer)
-craft accept [note]      Confirm alignment, advance to building
+craft accept [note]      Confirm alignment, advance to shaping
 craft reject [note]      Record concern, stay in thinking
+craft shape              Show shaping status
+craft shape --generate   Generate pitch and cards via AI
+craft approve            Approve structure, advance to building
+craft revise "note"      Record concern during shaping
 craft ship               Finalize the work
 craft status             Show current state and valid actions
 craft reset              Abandon current workflow
 craft init [flags]       Copy AI integration templates
 ```
+
+Use `craft accept --skip-shaping` to go directly to building for simple tasks.
 
 ## Installation
 
@@ -43,12 +49,24 @@ Or download the binary from [Releases](https://github.com/luuuc/craft/releases).
 $ craft start "Add rate limiting to API"
 Workflow started. State: thinking
 
-$ craft ship
-Error: Invalid transition. Current state: thinking
-Must accept before shipping.
+$ craft accept "Token bucket algorithm"
+Intent frozen. State: shaping
 
-$ craft accept "Decided on token bucket algorithm"
-Intent frozen. State: building
+$ craft shape
+Shaping: Add rate limiting to API
+Structure: (none)
+Next: craft shape --generate OR create .craft/pitch.md
+
+$ craft shape --generate
+Generating via AI...
+Created:
+  .craft/pitch.md
+  .craft/cards/01-rate-limiter.md
+  .craft/cards/02-middleware.md
+Next: craft approve
+
+$ craft approve
+Structure approved. State: building
 
 $ craft ship
 Workflow complete. State: shipped
@@ -115,8 +133,10 @@ This project is built using craft.
 Every feature follows the workflow:
 1. `craft start "<intent>"` - Begin with explicit intent
 2. `craft think` - Deliberate before building
-3. `craft accept` - Freeze intent, start implementation
-4. `craft ship` - Finalize when complete
+3. `craft accept` - Freeze intent, advance to shaping
+4. `craft shape --generate` or create pitch manually
+5. `craft approve` - Approve structure, start implementation
+6. `craft ship` - Finalize when complete
 
 We eat our own dog food.
 

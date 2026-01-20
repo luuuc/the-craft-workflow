@@ -8,6 +8,7 @@ func TestStateValid(t *testing.T) {
 		want  bool
 	}{
 		{Thinking, true},
+		{Shaping, true},
 		{Building, true},
 		{Shipped, true},
 		{State("invalid"), false},
@@ -31,13 +32,20 @@ func TestValidateTransition(t *testing.T) {
 		wantErr bool
 	}{
 		// Valid transitions
-		{"thinking to building", Thinking, Building, false},
+		{"thinking to shaping", Thinking, Shaping, false},
+		{"thinking to building (skip shaping)", Thinking, Building, false},
+		{"shaping to building", Shaping, Building, false},
 		{"building to shipped", Building, Shipped, false},
 
 		// Invalid transitions
 		{"thinking to shipped", Thinking, Shipped, true},
+		{"shaping to thinking", Shaping, Thinking, true},
+		{"shaping to shipped", Shaping, Shipped, true},
+		{"shaping to shaping", Shaping, Shaping, true},
 		{"building to thinking", Building, Thinking, true},
+		{"building to shaping", Building, Shaping, true},
 		{"shipped to thinking", Shipped, Thinking, true},
+		{"shipped to shaping", Shipped, Shaping, true},
 		{"shipped to building", Shipped, Building, true},
 		{"thinking to thinking", Thinking, Thinking, true},
 		{"building to building", Building, Building, true},
@@ -63,7 +71,8 @@ func TestNextValidActions(t *testing.T) {
 		state State
 		want  []string
 	}{
-		{Thinking, []string{"accept", "reject", "reset"}},
+		{Thinking, []string{"accept", "accept --skip-shaping", "reject", "reset"}},
+		{Shaping, []string{"shape", "approve", "revise", "reset"}},
 		{Building, []string{"ship", "reset"}},
 		{Shipped, []string{"reset"}},
 		{State("invalid"), nil},

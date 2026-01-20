@@ -7,6 +7,7 @@ type State string
 
 const (
 	Thinking State = "thinking"
+	Shaping  State = "shaping"
 	Building State = "building"
 	Shipped  State = "shipped"
 )
@@ -14,7 +15,7 @@ const (
 // Valid returns true if s is a recognized state.
 func (s State) Valid() bool {
 	switch s {
-	case Thinking, Building, Shipped:
+	case Thinking, Shaping, Building, Shipped:
 		return true
 	default:
 		return false
@@ -27,6 +28,11 @@ func (s State) String() string {
 }
 
 // ValidateTransition checks if a transition from one state to another is allowed.
+// Transition rules:
+//   - thinking → shaping (via accept)
+//   - thinking → building (via accept --skip-shaping)
+//   - shaping → building (via approve)
+//   - building → shipped (via ship)
 func ValidateTransition(from, to State) error {
 	if !from.Valid() {
 		return fmt.Errorf("invalid current state: %s", from)
@@ -37,6 +43,11 @@ func ValidateTransition(from, to State) error {
 
 	switch from {
 	case Thinking:
+		if to == Shaping || to == Building {
+			return nil
+		}
+		return fmt.Errorf("invalid transition: cannot go from %s to %s", from, to)
+	case Shaping:
 		if to == Building {
 			return nil
 		}
@@ -57,7 +68,9 @@ func ValidateTransition(from, to State) error {
 func NextValidActions(current State) []string {
 	switch current {
 	case Thinking:
-		return []string{"accept", "reject", "reset"}
+		return []string{"accept", "accept --skip-shaping", "reject", "reset"}
+	case Shaping:
+		return []string{"shape", "approve", "revise", "reset"}
 	case Building:
 		return []string{"ship", "reset"}
 	case Shipped:

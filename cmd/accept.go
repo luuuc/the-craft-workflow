@@ -9,7 +9,7 @@ import (
 	"craft/internal/workflow"
 )
 
-// Accept confirms alignment and advances from thinking to building.
+// Accept confirms alignment and advances from thinking to shaping (or building with --skip-shaping).
 func Accept(args []string) int {
 	w, err := workflow.Load()
 	if err != nil {
@@ -22,16 +22,33 @@ func Accept(args []string) int {
 		return 1
 	}
 
+	// Check for --skip-shaping flag
+	skipShaping := false
+	var filteredArgs []string
+	for _, arg := range args {
+		if arg == "--skip-shaping" {
+			skipShaping = true
+		} else {
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
+
 	// Get optional note for history
 	var note string
-	if len(args) > 0 {
-		note = strings.Join(args, " ")
+	if len(filteredArgs) > 0 {
+		note = strings.Join(filteredArgs, " ")
 		note = strings.Trim(note, "\"'")
 		note = strings.TrimSpace(note)
 		w.AddNote(note)
 	}
 
-	if err := w.TransitionWithNote(state.Building, note); err != nil {
+	// Determine target state
+	targetState := state.Shaping
+	if skipShaping {
+		targetState = state.Building
+	}
+
+	if err := w.TransitionWithNote(targetState, note); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
@@ -41,6 +58,13 @@ func Accept(args []string) int {
 		return 1
 	}
 
-	fmt.Println("Intent frozen. State: building")
+	if skipShaping {
+		fmt.Println("Intent frozen. State: building")
+	} else {
+		fmt.Println("Intent frozen. State: shaping")
+		fmt.Println()
+		fmt.Println("Structure your work, then run `craft approve` to start building.")
+		fmt.Println("Or run `craft shape --generate` for AI assistance.")
+	}
 	return 0
 }

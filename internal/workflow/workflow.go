@@ -16,7 +16,7 @@ import (
 const (
 	CraftDir      = ".craft"
 	WorkflowFile  = "workflow.md"
-	SchemaVersion = 2
+	SchemaVersion = 3
 )
 
 // YAML front matter keys
@@ -286,8 +286,8 @@ func (w *Workflow) Save() error {
 		return fmt.Errorf("failed to create .craft directory: %w", err)
 	}
 
-	// Migrate to v2 if needed
-	w.migrateToV2()
+	// Migrate schema if needed
+	w.migrateSchema()
 
 	content := w.Format()
 
@@ -306,25 +306,29 @@ func (w *Workflow) Save() error {
 	return nil
 }
 
-// migrateToV2 upgrades a v1 workflow to v2 schema.
+// migrateSchema upgrades older schema versions to the current version.
 // Called by Save() after Load() has already synthesized history.
-func (w *Workflow) migrateToV2() {
-	if w.SchemaVersion >= 2 {
+func (w *Workflow) migrateSchema() {
+	if w.SchemaVersion >= SchemaVersion {
 		return
 	}
 
-	// StartedAt and History should already be set by Load()'s synthesizeV1History.
-	// These are safety fallbacks for direct Parse() usage.
-	if w.StartedAt.IsZero() {
-		w.StartedAt = time.Now().UTC()
+	// V1 to V2+: Ensure StartedAt and History are set
+	if w.SchemaVersion < 2 {
+		if w.StartedAt.IsZero() {
+			w.StartedAt = time.Now().UTC()
+		}
+
+		if len(w.History) == 0 {
+			w.History = []HistoryEntry{{
+				State: string(w.State),
+				At:    w.StartedAt,
+			}}
+		}
 	}
 
-	if len(w.History) == 0 {
-		w.History = []HistoryEntry{{
-			State: string(w.State),
-			At:    w.StartedAt,
-		}}
-	}
+	// V2 to V3: No structural changes, just new shaping state support
+	// Existing workflows continue to work - shaping is only for new workflows
 
 	w.SchemaVersion = SchemaVersion
 }

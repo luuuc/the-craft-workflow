@@ -119,8 +119,43 @@ func TestAcceptFromThinking(t *testing.T) {
 	}
 
 	w, _ := workflow.Load()
+	if w.State != "shaping" {
+		t.Errorf("State = %s, want shaping", w.State)
+	}
+}
+
+func TestAcceptSkipShaping(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+	code := Accept([]string{"--skip-shaping"})
+	if code != 0 {
+		t.Errorf("Accept(--skip-shaping) = %d, want 0", code)
+	}
+
+	w, _ := workflow.Load()
 	if w.State != "building" {
 		t.Errorf("State = %s, want building", w.State)
+	}
+}
+
+func TestAcceptSkipShapingWithNote(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+	code := Accept([]string{"--skip-shaping", "Quick fix"})
+	if code != 0 {
+		t.Errorf("Accept(--skip-shaping, note) = %d, want 0", code)
+	}
+
+	w, _ := workflow.Load()
+	if w.State != "building" {
+		t.Errorf("State = %s, want building", w.State)
+	}
+	if len(w.Notes) != 1 || w.Notes[0] != "Quick fix" {
+		t.Errorf("Notes = %v, want [Quick fix]", w.Notes)
 	}
 }
 
@@ -137,15 +172,15 @@ func TestAcceptWithNote(t *testing.T) {
 	}
 }
 
-func TestAcceptFromBuilding(t *testing.T) {
+func TestAcceptFromShaping(t *testing.T) {
 	cleanup := setupTest(t)
 	defer cleanup()
 
 	Start([]string{"Test"})
-	Accept(nil)
+	Accept(nil) // Now in shaping
 	code := Accept(nil)
 	if code != 1 {
-		t.Errorf("Accept() from building = %d, want 1", code)
+		t.Errorf("Accept() from shaping = %d, want 1", code)
 	}
 }
 
@@ -168,15 +203,15 @@ func TestRejectFromThinking(t *testing.T) {
 	}
 }
 
-func TestRejectFromBuilding(t *testing.T) {
+func TestRejectFromShaping(t *testing.T) {
 	cleanup := setupTest(t)
 	defer cleanup()
 
 	Start([]string{"Test"})
-	Accept(nil)
+	Accept(nil) // Now in shaping
 	code := Reject([]string{"Too late"})
 	if code != 1 {
-		t.Errorf("Reject() from building = %d, want 1", code)
+		t.Errorf("Reject() from shaping = %d, want 1", code)
 	}
 }
 
@@ -185,7 +220,7 @@ func TestShipFromBuilding(t *testing.T) {
 	defer cleanup()
 
 	Start([]string{"Test"})
-	Accept(nil)
+	Accept([]string{"--skip-shaping"})
 	code := Ship(nil)
 	if code != 0 {
 		t.Errorf("Ship() = %d, want 0", code)
@@ -213,11 +248,23 @@ func TestShipFromShipped(t *testing.T) {
 	defer cleanup()
 
 	Start([]string{"Test"})
-	Accept(nil)
+	Accept([]string{"--skip-shaping"})
 	Ship(nil)
 	code := Ship(nil)
 	if code != 1 {
 		t.Errorf("Ship() from shipped = %d, want 1", code)
+	}
+}
+
+func TestShipFromShaping(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+	Accept(nil) // Now in shaping
+	code := Ship(nil)
+	if code != 1 {
+		t.Errorf("Ship() from shaping = %d, want 1", code)
 	}
 }
 
@@ -267,7 +314,7 @@ func TestResetNoWorkflow(t *testing.T) {
 	}
 }
 
-func TestFullWorkflow(t *testing.T) {
+func TestFullWorkflowWithSkipShaping(t *testing.T) {
 	cleanup := setupTest(t)
 	defer cleanup()
 
@@ -284,11 +331,11 @@ func TestFullWorkflow(t *testing.T) {
 		t.Fatalf("Reject() = %d", code)
 	}
 
-	// Think and accept
+	// Think and accept (skip shaping)
 	if code := Think(nil); code != 0 {
 		t.Fatalf("Think() = %d", code)
 	}
-	if code := Accept([]string{"Decided on token bucket algorithm"}); code != 0 {
+	if code := Accept([]string{"--skip-shaping", "Decided on token bucket algorithm"}); code != 0 {
 		t.Fatalf("Accept() = %d", code)
 	}
 
@@ -512,5 +559,168 @@ func TestInitSkipsExisting(t *testing.T) {
 	// But .claude/commands/craft.md should be created
 	if _, err := os.Stat(".claude/commands/craft.md"); os.IsNotExist(err) {
 		t.Error(".claude/commands/craft.md should exist")
+	}
+}
+
+// Tests for new shaping phase commands
+
+func TestShapeFromShaping(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+	Accept(nil) // Now in shaping
+
+	code := Shape(nil)
+	if code != 0 {
+		t.Errorf("Shape() = %d, want 0", code)
+	}
+}
+
+func TestShapeFromThinking(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+	code := Shape(nil)
+	if code != 1 {
+		t.Errorf("Shape() from thinking = %d, want 1", code)
+	}
+}
+
+func TestApproveFromShaping(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+	Accept(nil) // Now in shaping
+
+	// Create pitch file
+	os.MkdirAll(".craft", 0755)
+	os.WriteFile(".craft/pitch.md", []byte("# Pitch"), 0644)
+
+	code := Approve(nil)
+	if code != 0 {
+		t.Errorf("Approve() = %d, want 0", code)
+	}
+
+	w, _ := workflow.Load()
+	if w.State != "building" {
+		t.Errorf("State = %s, want building", w.State)
+	}
+}
+
+func TestApproveNoPitch(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+	Accept(nil) // Now in shaping
+
+	code := Approve(nil)
+	if code != 1 {
+		t.Errorf("Approve() without pitch = %d, want 1", code)
+	}
+}
+
+func TestApproveFromThinking(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+	code := Approve(nil)
+	if code != 1 {
+		t.Errorf("Approve() from thinking = %d, want 1", code)
+	}
+}
+
+func TestReviseFromShaping(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+	Accept(nil) // Now in shaping
+
+	code := Revise([]string{"Need to rethink this"})
+	if code != 0 {
+		t.Errorf("Revise() = %d, want 0", code)
+	}
+
+	w, _ := workflow.Load()
+	if w.State != "shaping" {
+		t.Errorf("State = %s, want shaping", w.State)
+	}
+	if len(w.Notes) != 1 {
+		t.Errorf("Notes count = %d, want 1", len(w.Notes))
+	}
+	if !strings.Contains(w.Notes[0], "[revise]") {
+		t.Errorf("Note should contain [revise] prefix, got %q", w.Notes[0])
+	}
+}
+
+func TestReviseNoNote(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+	Accept(nil) // Now in shaping
+
+	code := Revise(nil)
+	if code != 1 {
+		t.Errorf("Revise() without note = %d, want 1", code)
+	}
+}
+
+func TestReviseFromThinking(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	Start([]string{"Test"})
+	code := Revise([]string{"Some note"})
+	if code != 1 {
+		t.Errorf("Revise() from thinking = %d, want 1", code)
+	}
+}
+
+func TestFullWorkflowWithShaping(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
+	// Start
+	if code := Start([]string{"Add rate limiting"}); code != 0 {
+		t.Fatalf("Start() = %d", code)
+	}
+
+	// Think and accept (goes to shaping)
+	if code := Accept([]string{"Token bucket algorithm"}); code != 0 {
+		t.Fatalf("Accept() = %d", code)
+	}
+
+	w, _ := workflow.Load()
+	if w.State != "shaping" {
+		t.Fatalf("State after accept = %s, want shaping", w.State)
+	}
+
+	// Create pitch manually (simulating manual shaping)
+	os.WriteFile(".craft/pitch.md", []byte("# Pitch: Rate Limiting"), 0644)
+
+	// Approve (goes to building)
+	if code := Approve(nil); code != 0 {
+		t.Fatalf("Approve() = %d", code)
+	}
+
+	w, _ = workflow.Load()
+	if w.State != "building" {
+		t.Fatalf("State after approve = %s, want building", w.State)
+	}
+
+	// Ship
+	if code := Ship(nil); code != 0 {
+		t.Fatalf("Ship() = %d", code)
+	}
+
+	w, _ = workflow.Load()
+	if w.State != "shipped" {
+		t.Errorf("Final state = %s, want shipped", w.State)
 	}
 }

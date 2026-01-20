@@ -84,8 +84,8 @@ func TestRunCommands(t *testing.T) {
 		t.Errorf("reject = %d, want 0", code)
 	}
 
-	// Test accept
-	code = run([]string{"accept"})
+	// Test accept (with --skip-shaping to go directly to building)
+	code = run([]string{"accept", "--skip-shaping"})
 	if code != 0 {
 		t.Errorf("accept = %d, want 0", code)
 	}

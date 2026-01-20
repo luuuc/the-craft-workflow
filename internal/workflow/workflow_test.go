@@ -39,7 +39,7 @@ func TestWorkflowFormat(t *testing.T) {
 	if !strings.Contains(formatted, "state: thinking") {
 		t.Error("Format() missing state")
 	}
-	if !strings.Contains(formatted, "schema_version: 2") {
+	if !strings.Contains(formatted, "schema_version: 3") {
 		t.Error("Format() missing schema_version")
 	}
 	if !strings.Contains(formatted, "checksum:") {
@@ -325,7 +325,7 @@ func TestRecordTransition(t *testing.T) {
 	}
 }
 
-func TestMigrateV1ToV2(t *testing.T) {
+func TestMigrateV1ToLatest(t *testing.T) {
 	// Create a v1 workflow content
 	v1Content := `---
 state: thinking
@@ -355,13 +355,13 @@ V1 workflow
 	os.Chdir(tmpDir)
 	defer os.Chdir(origDir)
 
-	// Save should migrate to v2
+	// Save should migrate to latest version
 	if err := parsed.Save(); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	if parsed.SchemaVersion != 2 {
-		t.Errorf("After migration schema_version = %d, want 2", parsed.SchemaVersion)
+	if parsed.SchemaVersion != SchemaVersion {
+		t.Errorf("After migration schema_version = %d, want %d", parsed.SchemaVersion, SchemaVersion)
 	}
 
 	if len(parsed.History) == 0 {
