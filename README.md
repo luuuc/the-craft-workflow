@@ -20,7 +20,7 @@ You can't ship without building. You can't build without thinking first.
 
 ```
 craft start "<intent>"   Begin with explicit intent
-craft think              Review where you are
+craft think [--review]   Review where you are (optionally invoke reviewer)
 craft accept [note]      Confirm alignment, advance to building
 craft reject [note]      Record concern, stay in thinking
 craft ship               Finalize the work
@@ -69,9 +69,7 @@ Markdown with YAML front matter. Human-readable. Machine-parseable. Includes tim
 ## What This Tool Does Not Do
 
 - No task management
-- No AI suggestions
 - No daemon or background process
-- No network calls
 - No configuration files
 
 ## AI Integration
@@ -85,6 +83,30 @@ craft init --all       # All templates
 ```
 
 Or see [templates/INTEGRATION.md](templates/INTEGRATION.md) for manual setup.
+
+## Optional Review
+
+Invoke external reviewers during thinking:
+
+```
+craft think --review          # Auto-detect best reviewer
+craft think --review=ai       # Use AI reviewer
+craft think --review=council  # Use council-cli
+```
+
+Environment variables for AI review:
+- `CRAFT_AI_API_KEY` — Required
+- `CRAFT_AI_MODEL` — Optional (default: gpt-4o-mini)
+- `CRAFT_AI_BASE_URL` — Optional (default: OpenAI)
+
+For local models (Ollama):
+```bash
+export CRAFT_AI_BASE_URL=http://localhost:11434/v1
+export CRAFT_AI_MODEL=llama3
+export CRAFT_AI_API_KEY=unused  # Required but not validated by Ollama
+```
+
+Without configuration, falls back to self-review prompts.
 
 ## Development Workflow
 
