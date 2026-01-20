@@ -24,17 +24,20 @@ func Init(args []string) int {
 	}
 
 	var created, skipped []string
+	var hadError bool
 
 	if flags.claude {
-		c, s := installClaudeTemplates()
+		c, s, err := installClaudeTemplates()
 		created = append(created, c...)
 		skipped = append(skipped, s...)
+		hadError = hadError || err
 	}
 
 	if flags.cursor {
-		c, s := installCursorTemplates()
+		c, s, err := installCursorTemplates()
 		created = append(created, c...)
 		skipped = append(skipped, s...)
+		hadError = hadError || err
 	}
 
 	for _, f := range created {
@@ -48,6 +51,9 @@ func Init(args []string) int {
 		fmt.Println("\nAll templates already exist.")
 	}
 
+	if hadError {
+		return 1
+	}
 	return 0
 }
 
@@ -72,11 +78,12 @@ func parseInitFlags(args []string) initFlags {
 	return flags
 }
 
-func installClaudeTemplates() (created, skipped []string) {
+func installClaudeTemplates() (created, skipped []string, hadError bool) {
 	// CLAUDE.md
 	claudeMD, err := templates.ClaudeTemplate()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading CLAUDE.md template: %v\n", err)
+		hadError = true
 		return
 	}
 	if writeIfNotExists("CLAUDE.md", claudeMD) {
@@ -89,6 +96,7 @@ func installClaudeTemplates() (created, skipped []string) {
 	craftCmd, err := templates.CraftCommand()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading craft.md template: %v\n", err)
+		hadError = true
 		return
 	}
 	cmdPath := filepath.Join(".claude", "commands", "craft.md")
@@ -101,10 +109,11 @@ func installClaudeTemplates() (created, skipped []string) {
 	return
 }
 
-func installCursorTemplates() (created, skipped []string) {
+func installCursorTemplates() (created, skipped []string, hadError bool) {
 	cursorRules, err := templates.CursorRules()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading cursor-rules.md template: %v\n", err)
+		hadError = true
 		return
 	}
 	if writeIfNotExists(".cursorrules", cursorRules) {

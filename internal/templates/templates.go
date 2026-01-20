@@ -1,9 +1,6 @@
 package templates
 
-import (
-	"embed"
-	"io/fs"
-)
+import "embed"
 
 //go:embed files/*
 var embedded embed.FS
@@ -26,10 +23,4 @@ func CursorRules() ([]byte, error) {
 // IntegrationDoc returns the INTEGRATION.md template content.
 func IntegrationDoc() ([]byte, error) {
 	return embedded.ReadFile("files/INTEGRATION.md")
-}
-
-// FS returns the embedded filesystem for iteration.
-func FS() fs.FS {
-	sub, _ := fs.Sub(embedded, "files")
-	return sub
 }
