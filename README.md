@@ -64,7 +64,7 @@ All state lives in a single file:
 .craft/workflow.md
 ```
 
-Markdown with YAML front matter. Human-readable. Machine-parseable. A checksum detects tampering.
+Markdown with YAML front matter. Human-readable. Machine-parseable. Includes timestamps and history for accountability. A checksum detects tampering.
 
 ## What This Tool Does Not Do
 
